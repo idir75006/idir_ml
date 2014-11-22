@@ -1,0 +1,145 @@
+---
+
+
+
+Course Project in Practical Machine Learning
+--------------------------------------------
+
+author: Idir GHOUT
+------------------
+
+2014/11/22
+----------
+
+The predictive model of how well people do their personal activity was developed following these steps: 
+
+ * On the overall data set, we selected the variables about belt, forearm, arm, and dumbell of data from accelerometers informations.
+ * Cleaning the data and removing variables with high rate of missing data: because all variables with missing data had the rate of missing data more than 20%, we didn't any imputation of the missing data.  
+ * I use the function createDataPartition of caret package to split data en training set and testing set.
+ * Using the package RAAN and the function nearZeroVar we checked for Zero- and Near Zero-Variance Predictors
+ * Correlation:  the 2 algorithm used to build the model could deal with the hight correlations.  
+ * Cross validation: I did 10 folds cross validation using the function trainControl. I break the training set up into 10 fold  sets, which results on 10 Sub training set and 10 sub testing set to evaluate models. This may ovoid over fitting when use random forest.
+ * I tried 2 machine learning algorithms Random Forrest (RF) and boosting.  The Random is the base model it had the lowest error rate. 
+ * The error rate of final random Forrest model calculated on the testing set (which not used to developed and selected the final model) was 0.8%.
+ * Finally, using the developed model, I predict the "class" variable of the 20 out sample and I submitted the results.  
+
+```{r, eval=FALSE}
+# R code 
+rm(list=ls())
+#install.packages("RANN")
+#install.packages("caret")
+#install.packages("e1071")
+require(RANN); require(caret)
+require(e1071)
+
+#  Import of Data 
+rep0<-"F:/ML_project"
+dataset<-read.csv(file.path(rep0,"pml-training.csv"))
+validateset<-read.csv(file.path(rep0,"pml-testing.csv"))
+
+dim(dataset); dim(validateset)
+
+# Select the data from accelerometers on the belt, forearm, arm, and dumbell 
+sum(grepl("belt|forearm|arm|dumbell|class",names(dataset)))
+dataset<-dataset[,grepl("belt|forearm|arm|dumbell|class",names(dataset)) ]
+validateset<-validateset[,grepl("belt|forearm|arm|dumbell|class",names(validateset)) ] 
+
+ 
+# Cleaning the data 
+classVar<-sapply(dataset,class) %in% "factor"
+#summary(dataset[,classVar])
+
+dataset[,classVar]<-rapply(dataset[,classVar],function(x)  {
+  if(any(x %in% "#DIV/0!")) {as.numeric(ifelse(x %in%  "#DIV/0!",NA,as.character(x))) }
+  else{as.factor(as.character(x)) }  
+},how="replace")
+
+classVar<-sapply(dataset,class) %in% "factor"
+summary(dataset[,classVar])
+
+validClassVar<-sapply(validateset,class) %in% "factor"
+table(validClassVar)# 0
+
+
+# Remove variables
+# usernames
+
+#dataset<-dataset[,-1]; validateset<-validateset[,-1]
+#with more than 20% missing data
+# na > 20%
+table(cut(sapply(dataset,function(x) (sum(is.na (x)) / length(x))),c(0,0.2,0.5,1) ))
+
+withMissing<-names(dataset)[sapply(dataset,function(x) any(is.na (x) ))] 
+length(  withMissing                          )
+dataset<-dataset[,!names(dataset) %in% withMissing]
+
+validateset<-validateset[,!names(validateset) %in% withMissing]
+
+
+#----  Zero- and Near Zero-Variance Predictors
+nzv <- nearZeroVar(dataset, saveMetrics = TRUE)
+sum(nzv$zeroVar) # 0
+
+
+# Data split
+inTrain<-createDataPartition(dataset$classe,p=0.7,list = F)
+training<-dataset[inTrain,]
+testing<-dataset[-inTrain,]
+
+
+# correlations
+table(sapply(dataset,class))
+mat.cor<-cor(sapply(dataset,as.numeric))
+cor(sapply(dataset,as.numeric))
+table(unlist(abs(mat.cor[upper.tri(mat.cor)])>0.90))
+mat.cor[mat.cor>0.9]
+
+# Cross validation
+fitcontrol<-trainControl(method = "cv", repeats = 10,p = 0.7)
+
+# Model 1: Random Forest
+rfFit1 <- train(classe ~ ., data = training,
+                 method = "rf", trControl = fitcontrol,
+                 verbose = FALSE)
+
+
+# Model 2 : boosting
+gbmFit2 <- train(classe ~ ., data = training,
+                 method = "gbm", trControl = fitcontrol,
+                 verbose = FALSE)
+
+# save the 2 models
+
+saveRDS(rfFit1,file.path(rep0,"rfFit1.rds"))
+saveRDS(gbmFit2,file.path(rep0,"gbmFit2.rds"))
+
+rfFit1<-readRDS(file.path(rep0,"rfFit1.rds"))
+gbmFit2<-readRDS(file.path(rep0,"gbmFit2.rds"))
+
+
+rfFit1
+gbmFit2 
+
+# accuracy
+rfFit1$results[rfFit1$result$mtry == 2,"Accuracy" ] # best model
+gbmFit2$results[nrow(gbmFit2$results),"Accuracy"]
+
+# sample out error
+1-confusionMatrix(testing$classe,predict(rfFit1,testing))["overall"]$overall["Accuracy"]
+            
+pred_classe<-predict(rfFit1,validateset)
+
+## function to create one-charater files from test-set predictions
+setwd(rep0)
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE,eol="")
+  }
+}
+## write files
+pml_write_files(as.character(pred_classe))
+
+```
+
